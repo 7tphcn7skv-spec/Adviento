@@ -1,0 +1,32 @@
+name: Avisos diarios
+
+on:
+  schedule:
+    # Hora UTC. En diciembre España va una hora por delante (UTC+1).
+    # GitHub puede retrasar el arranque, por eso empieza antes y el script espera a la hora exacta.
+    - cron: "35 22 30 11 *"   # 30 nov, 23:35 en España → aviso del día 1 a las 00:00
+    - cron: "45 6 2-24 12 *"  # 2–24 dic, 7:45 en España → aviso a las 8:30
+  workflow_dispatch:
+    inputs:
+      prueba:
+        description: "Texto del aviso de prueba"
+        required: false
+        default: "Esto es un aviso de prueba de tu calendario"
+
+permissions:
+  contents: read
+
+jobs:
+  avisar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-save --no-package-lock web-push@3.6.7
+      - run: node avisos/enviar.mjs
+        env:
+          CLAVE_AVISOS: ${{ secrets.CLAVE_AVISOS }}
+          PRUEBA: ${{ github.event_name == 'workflow_dispatch' && inputs.prueba || '' }}

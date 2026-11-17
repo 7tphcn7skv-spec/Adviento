@@ -289,6 +289,9 @@ img{max-width:100%}
 .sync-fila{display:flex;gap:8px}
 .sync-fila input{flex:1;min-width:0;font:inherit;font-size:14px;padding:10px;border-radius:10px;border:1.5px solid rgba(247,237,211,.35);background:rgba(247,237,211,.08);color:var(--crema)}
 .sync-fila button{border:0;border-radius:10px;padding:0 14px;background:var(--oro);color:var(--verde-noche);font-weight:700}
+.avisos-btn{justify-self:center;margin-top:8px;border:1.5px solid var(--verde);background:var(--nieve);color:var(--verde);border-radius:999px;padding:8px 16px;font-weight:700;font-size:14px}
+.avisos-btn.on{background:none;border-color:transparent;font-weight:500;opacity:.85}
+.avisos-btn:disabled{cursor:default}
 .sync-estado{margin:0;font-size:13px;font-weight:700;color:var(--verde)}
 </style>
 
@@ -386,12 +389,17 @@ img{max-width:100%}
 window.SyncApp = (() => {
   const REPO = "7tphcn7skv-spec/adviento";
   const API = "https://api.github.com/repos/" + REPO + "/contents/";
-  let KEY = null, TOKEN = null, ocupado = false, temporizador = null;
+  let KEY = null, AKEY = null, VAPID = null, TOKEN = null, ocupado = false, temporizador = null;
   const b64 = u8 => { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
   const deB64 = t => Uint8Array.from(atob(t.replace(/\s/g, "")), c => c.charCodeAt(0));
   async function cifrar(texto) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ct = new Uint8Array(await crypto.subtle.encrypt({name: "AES-GCM", iv}, KEY, new TextEncoder().encode(texto)));
+    const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12); return b64(out);
+  }
+  async function cifrarCon(clave, texto) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({name: "AES-GCM", iv}, clave, new TextEncoder().encode(texto)));
     const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12); return b64(out);
   }
   async function descifrar(t) {
@@ -444,6 +452,48 @@ window.SyncApp = (() => {
     } catch (e) { estado("Sin conexión: las fotos se sincronizarán más tarde"); }
     ocupado = false;
   }
+  /* ---------- Avisos de cada mañana ---------- */
+  const deB64url = t => deB64(t.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((t.length + 3) % 4));
+  async function guardarAviso(sub) {
+    if (!TOKEN) throw new Error("sin-sync");
+    const j = JSON.stringify(sub);
+    let previo = null; try { previo = localStorage.getItem("adv_aviso"); } catch (e) {}
+    if (previo === sub.endpoint) return;
+    const h = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(sub.endpoint)))).slice(0, 8).map(x => x.toString(16).padStart(2, "0")).join("");
+    await escribir("avisos/sub-" + h + ".bin", await cifrarCon(AKEY, j), "Activa los avisos en un móvil");
+    try { localStorage.setItem("adv_aviso", sub.endpoint); } catch (e) {}
+  }
+  async function montarAvisos() {
+    const cab = document.querySelector(".cabecera"); if (!cab) return;
+    const b = document.createElement("button"); b.className = "avisos-btn"; b.type = "button"; cab.appendChild(b);
+    const pon = (t, quieto) => { b.textContent = t; b.disabled = !!quieto; b.classList.toggle("on", !!quieto); };
+    const ios = /iP(hone|ad|od)/.test(navigator.userAgent);
+    const instalada = matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+      return pon(ios && !instalada ? "Para recibir avisos, añade la app a la pantalla de inicio" : "Este navegador no admite avisos", true);
+    }
+    if (Notification.permission === "denied") return pon("Avisos bloqueados en los ajustes del móvil", true);
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    const listo = () => pon("Avisos activados: cada mañana a las 8:30", true);
+    if (sub && Notification.permission === "granted") { listo(); guardarAviso(sub.toJSON()).catch(() => {}); return; }
+    pon("Activar avisos de cada mañana");
+    b.onclick = async () => {
+      b.disabled = true; b.textContent = "Activando…";
+      try {
+        if (!TOKEN) throw new Error("sin-sync");
+        if (await Notification.requestPermission() !== "granted") throw new Error("permiso");
+        sub = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: deB64url(VAPID)});
+        await guardarAviso(sub.toJSON());
+        listo();
+        reg.showNotification("Calendario de Adviento", {body: "Avisos activados. Cada mañana te avisaré cuando se abra una ventana nueva.", icon: "iconos/icono-192.png", tag: "adviento-bienvenida"});
+      } catch (e) {
+        if (Notification.permission === "denied") pon("Avisos bloqueados en los ajustes del móvil", true);
+        else pon(e.message === "sin-sync" ? "Primero conecta la sincronización (botón BETA)" : "No se han podido activar. Toca para reintentar");
+      }
+    };
+  }
+
   function estado(t) { const e = document.getElementById("syncEstado"); if (e) e.textContent = t; }
 
   async function conectar(token) {
@@ -480,8 +530,10 @@ window.SyncApp = (() => {
   return {
     activo: () => !!TOKEN,
     subir: d => subir(d),
-    async iniciar(rk) {   // se llama al abrir el candado, antes de arrancar la app
+    async iniciar(rk, ak, vapid) {   // se llama al abrir el candado, antes de arrancar la app
       KEY = await crypto.subtle.importKey("raw", deB64(rk), "AES-GCM", false, ["encrypt", "decrypt"]);
+      AKEY = await crypto.subtle.importKey("raw", deB64(ak), "AES-GCM", false, ["encrypt"]);
+      VAPID = vapid;
       try { TOKEN = localStorage.getItem("adv_sync"); } catch (e) {}
       if (!TOKEN) try {
         const r = await fetch("config.bin?t=" + Date.now(), {cache: "no-store"});
@@ -490,6 +542,7 @@ window.SyncApp = (() => {
     },
     arrancar() {         // la app ya está montada
       montarPanel();
+      montarAvisos().catch(() => {});
       const linea = document.createElement("p"); linea.id = "syncEstado"; linea.className = "sync-estado";
       const copia = document.getElementById("copiaTxt"); if (copia) copia.after(linea);
       estado(TOKEN ? "Sincronizando…" : "Sincronización entre móviles desactivada");
@@ -539,6 +592,10 @@ const dato = d => Object.assign({}, DIAS[d - 1], cambios[d] || {});
 const ahora = () => sim ? new Date(CONFIG.anio, CONFIG.mes, sim, 10) : new Date();
 const fechaDia = d => new Date(CONFIG.anio, CONFIG.mes, d);
 const diasHasta = f => Math.ceil((f - ahora()) / 864e5);
+// Hora a la que se desbloquea cada ventana: el día 1 a medianoche, el resto a las 8:30
+const HORA_APERTURA = [8, 30];
+const apertura = d => d === 1 ? new Date(CONFIG.anio, CONFIG.mes, 1, 0, 0) : new Date(CONFIG.anio, CONFIG.mes, d, HORA_APERTURA[0], HORA_APERTURA[1]);
+const horaTxt = d => d === 1 ? "a las 00:00" : "a las " + HORA_APERTURA[0] + ":" + String(HORA_APERTURA[1]).padStart(2, "0");
 const tono = d => (350 + d * 23) % 360;
 const fondoFoto = d => fotos[d] ? `url("${fotos[d]}")` : `linear-gradient(135deg,hsl(${tono(d)} 45% 42%),hsl(${tono(d) + 40} 50% 30%))`;
 
@@ -546,9 +603,9 @@ function estadoDia(d) {
   if (abiertas.includes(d)) return "abierta";
   const n = ahora(), f = fechaDia(d);
   const mismo = n.getFullYear() === f.getFullYear() && n.getMonth() === f.getMonth() && n.getDate() === d;
+  if (n < apertura(d)) return "cerrada";
   if (mismo) return "hoy";
-  if (n > f) return CONFIG.soloEseDia ? "perdida" : "lista";
-  return "cerrada";
+  return CONFIG.soloEseDia ? "perdida" : "lista";
 }
 
 function vibrar(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
@@ -823,8 +880,10 @@ function tocar(d) {
   if (e === "cerrada" || e === "perdida") {
     vibrar([30, 40, 30]); const w = wins[d]; w.classList.remove("niega"); void w.offsetWidth; w.classList.add("niega");
     if (e === "perdida") return avisar("Esta ventana solo se podía abrir el " + d + " de diciembre.");
-    const k = diasHasta(fechaDia(d));
-    return avisar("Todavía no. Se abre el " + d + " de diciembre" + (k === 1 ? ", mañana." : ", faltan " + k + " días."));
+    const n = ahora(), hoyMismo = n.getFullYear() === CONFIG.anio && n.getMonth() === CONFIG.mes && n.getDate() === d;
+    if (hoyMismo) return avisar("Todavía no. Se abre hoy " + horaTxt(d) + ".");
+    const k = Math.round((fechaDia(d) - new Date(n.getFullYear(), n.getMonth(), n.getDate())) / 864e5);
+    return avisar("Todavía no. Se abre el " + d + " de diciembre " + horaTxt(d) + (k === 1 ? ", mañana." : ", faltan " + k + " días."));
   }
   abrir(d, e === "abierta");
 }
@@ -1071,7 +1130,7 @@ async function abrirCandado(clave, recordar) {
   const DATOS = await descifrar(clave);
   if (recordar) try { localStorage.setItem("adv_clave", clave); } catch (e) {}
   document.getElementById("candado").hidden = true;
-  try { await SyncApp.iniciar(DATOS.rk); } catch (e) {}
+  try { await SyncApp.iniciar(DATOS.rk, DATOS.ak, DATOS.vapid); } catch (e) {}
   arrancarApp(DATOS);
 }
 document.getElementById("candadoForm").addEventListener("submit", async ev => {
