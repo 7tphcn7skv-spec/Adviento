@@ -284,6 +284,12 @@ img{max-width:100%}
 .candado button:disabled{opacity:.6}
 .candado-error{min-height:1.4em;color:var(--tejado)}
 .candado-in.mal{animation:niega .4s}
+.sync-caja{display:grid;gap:8px;padding:12px;border-radius:14px;background:rgba(247,237,211,.08);font-size:14px}
+.sync-caja p{margin:0;opacity:.85}
+.sync-fila{display:flex;gap:8px}
+.sync-fila input{flex:1;min-width:0;font:inherit;font-size:14px;padding:10px;border-radius:10px;border:1.5px solid rgba(247,237,211,.35);background:rgba(247,237,211,.08);color:var(--crema)}
+.sync-fila button{border:0;border-radius:10px;padding:0 14px;background:var(--oro);color:var(--verde-noche);font-weight:700}
+.sync-estado{margin:0;font-size:13px;font-weight:700;color:var(--verde)}
 </style>
 
 <canvas id="nieve" class="capa"></canvas>
@@ -372,6 +378,129 @@ img{max-width:100%}
   </form>
 </div>
 <script>
+/* ---------- Sincronización entre los dos móviles ----------
+   Las fotos de los regalos se guardan cifradas en la carpeta recuerdos/ del
+   repositorio de GitHub. La clave de cifrado viaja dentro de datos.bin (que
+   solo se abre con la contraseña) y el permiso para escribir en GitHub va en
+   config.bin, también cifrado. Así nada personal queda a la vista. */
+window.SyncApp = (() => {
+  const REPO = "7tphcn7skv-spec/adviento";
+  const API = "https://api.github.com/repos/" + REPO + "/contents/";
+  let KEY = null, TOKEN = null, ocupado = false, temporizador = null;
+  const b64 = u8 => { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+  const deB64 = t => Uint8Array.from(atob(t.replace(/\s/g, "")), c => c.charCodeAt(0));
+  async function cifrar(texto) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({name: "AES-GCM", iv}, KEY, new TextEncoder().encode(texto)));
+    const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12); return b64(out);
+  }
+  async function descifrar(t) {
+    const u = deB64(t);
+    return new TextDecoder().decode(await crypto.subtle.decrypt({name: "AES-GCM", iv: u.slice(0, 12)}, KEY, u.slice(12)));
+  }
+  function gh(ruta, op = {}) {
+    return fetch(API + ruta, Object.assign({cache: "no-store"}, op, {headers: Object.assign({
+      "Authorization": "Bearer " + TOKEN, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}, op.headers || {})}));
+  }
+  async function shaDe(ruta) { const r = await gh(ruta); return r.ok ? (await r.json()).sha : null; }
+  async function escribir(ruta, contenidoTexto, mensaje) {
+    for (let intento = 0; intento < 2; intento++) {
+      const sha = await shaDe(ruta);
+      const r = await gh(ruta, {method: "PUT", body: JSON.stringify({message: mensaje, content: btoa(contenidoTexto), sha: sha || undefined})});
+      if (r.ok) return (await r.json()).content.sha;
+      if (r.status !== 409 && r.status !== 422) throw new Error("GitHub " + r.status);
+    }
+    throw new Error("conflicto");
+  }
+  const nombre = d => "recuerdos/dia-" + String(d).padStart(2, "0") + ".bin";
+
+  async function subir(d) {
+    if (!TOKEN) return;
+    const rec = await Recuerdos.get(d); if (!rec || !rec.pendiente) return;
+    try {
+      const sha = await escribir(nombre(d), await cifrar(JSON.stringify({url: rec.url, fecha: rec.fecha})), "Foto del regalo del día " + d);
+      const ahora = await Recuerdos.get(d);
+      if (ahora && ahora.url === rec.url) await Recuerdos.put(d, {url: rec.url, fecha: rec.fecha, sha});
+      estado("Fotos al día en los dos móviles");
+    } catch (e) { estado("Pendiente de enviar: se enviará al volver a tener conexión"); }
+  }
+  async function bajar() {
+    if (!TOKEN || ocupado) return; ocupado = true;
+    try {
+      const r = await gh("recuerdos");
+      const lista = r.status === 404 ? [] : r.ok ? await r.json() : null;
+      if (!lista) throw new Error("lista");
+      for (const f of lista) {
+        const m = /^dia-(\d+)\.bin$/.exec(f.name); if (!m) continue;
+        const d = +m[1], local = await Recuerdos.get(d);
+        if (local && (local.sha === f.sha || local.pendiente)) continue;
+        const rr = await gh(nombre(d), {headers: {"Accept": "application/vnd.github.raw+json"}});
+        if (!rr.ok) continue;
+        const v = JSON.parse(await descifrar(await rr.text()));
+        await Recuerdos.put(d, {url: v.url, fecha: v.fecha, sha: f.sha});
+      }
+      for (let d = 1; d <= 24; d++) { const v = await Recuerdos.get(d); if (v && v.pendiente) await subir(d); }
+      estado("Fotos al día en los dos móviles");
+    } catch (e) { estado("Sin conexión: las fotos se sincronizarán más tarde"); }
+    ocupado = false;
+  }
+  function estado(t) { const e = document.getElementById("syncEstado"); if (e) e.textContent = t; }
+
+  async function conectar(token) {
+    TOKEN = token.trim();
+    const r = await fetch("https://api.github.com/repos/" + REPO, {cache: "no-store", headers: {"Authorization": "Bearer " + TOKEN, "Accept": "application/vnd.github+json"}});
+    if (!r.ok) { TOKEN = null; throw new Error("El código no es válido o no tiene acceso al repositorio."); }
+    const j = await r.json();
+    if (!j.permissions || !j.permissions.push) { TOKEN = null; throw new Error("El código no tiene permiso de escritura en el repositorio."); }
+    await escribir("config.bin", await cifrar(JSON.stringify({token: TOKEN})), "Activa la sincronización de fotos");
+    try { localStorage.setItem("adv_sync", TOKEN); } catch (e) {}
+    await bajar();
+  }
+
+  function montarPanel() {
+    const hoja = document.querySelector("#betaHoja .beta-in"); if (!hoja) return;
+    const caja = document.createElement("div"); caja.className = "sync-caja";
+    caja.innerHTML = '<strong>Sincronizar fotos entre los dos móviles</strong><p id="syncPanelTxt"></p>' +
+      '<div class="sync-fila" id="syncForm"><input id="syncToken" type="password" placeholder="Código de GitHub (github_pat_…)" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Código de GitHub">' +
+      '<button id="syncConectar" type="button">Conectar</button></div>';
+    hoja.insertBefore(caja, hoja.lastElementChild);
+    const pintarPanel = () => {
+      document.getElementById("syncPanelTxt").textContent = TOKEN ? "Activada. Las fotos que suba cualquiera de los dos aparecen en ambos móviles." : "Desactivada. Pega aquí el código de GitHub una sola vez; el otro móvil se conecta solo.";
+      document.getElementById("syncForm").hidden = !!TOKEN;
+    };
+    document.getElementById("syncConectar").addEventListener("click", async ev => {
+      const btn = ev.currentTarget; btn.disabled = true; btn.textContent = "Conectando…";
+      try { await conectar(document.getElementById("syncToken").value); pintarPanel(); }
+      catch (e) { document.getElementById("syncPanelTxt").textContent = e.message; }
+      btn.disabled = false; btn.textContent = "Conectar";
+    });
+    pintarPanel();
+  }
+
+  return {
+    activo: () => !!TOKEN,
+    subir: d => subir(d),
+    async iniciar(rk) {   // se llama al abrir el candado, antes de arrancar la app
+      KEY = await crypto.subtle.importKey("raw", deB64(rk), "AES-GCM", false, ["encrypt", "decrypt"]);
+      try { TOKEN = localStorage.getItem("adv_sync"); } catch (e) {}
+      if (!TOKEN) try {
+        const r = await fetch("config.bin?t=" + Date.now(), {cache: "no-store"});
+        if (r.ok) { TOKEN = JSON.parse(await descifrar(await r.text())).token; try { localStorage.setItem("adv_sync", TOKEN); } catch (e) {} }
+      } catch (e) {}
+    },
+    arrancar() {         // la app ya está montada
+      montarPanel();
+      const linea = document.createElement("p"); linea.id = "syncEstado"; linea.className = "sync-estado";
+      const copia = document.getElementById("copiaTxt"); if (copia) copia.after(linea);
+      estado(TOKEN ? "Sincronizando…" : "Sincronización entre móviles desactivada");
+      bajar();
+      clearInterval(temporizador); temporizador = setInterval(() => { if (!document.hidden) bajar(); }, 45000);
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) bajar(); });
+      addEventListener("online", bajar);
+    }
+  };
+})();
+
 function arrancarApp(DATOS) {
 /* =====================================================================
    CONFIGURACIÓN — todo lo editable está aquí arriba
@@ -444,7 +573,14 @@ const Recuerdos = (() => {
   const pedirPersistencia = () => { try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {} };
   return {
     get: d => op("readonly", s => s.get(d)).catch(() => null),
-    set: (d, url) => { pedirPersistencia(); return op("readwrite", s => s.put({url, fecha: Date.now()}, d)); },
+    // foto subida en este móvil: se guarda y, si hay sincronización, se envía al otro móvil
+    set: async (d, url, fecha) => {
+      pedirPersistencia();
+      await op("readwrite", s => s.put({url, fecha: fecha || Date.now(), pendiente: true}, d));
+      if (window.SyncApp) window.SyncApp.subir(d);
+    },
+    // registro tal cual (lo usa la sincronización)
+    put: async (d, rec) => { await op("readwrite", s => s.put(rec, d)); document.dispatchEvent(new CustomEvent("recuerdos", {detail: d})); },
     todos: async () => { const out = {}; for (let d = 1; d <= 24; d++) { const v = await op("readonly", s => s.get(d)).catch(() => null); if (v) out[d] = v; } return out; },
     async migrar() {   // trae la foto del ramo guardada con la versión anterior
       for (let d = 1; d <= 24; d++) { const v = leer("adv_recuerdo_" + d, null); if (v && !(await this.get(d))) { await this.set(d, v); } }
@@ -452,6 +588,8 @@ const Recuerdos = (() => {
   };
 })();
 Recuerdos.migrar().catch(() => {});
+window.Recuerdos = Recuerdos;
+if (window.SyncApp) window.SyncApp.arrancar();
 
 /* ---------- Construir la casa ---------- */
 const LAZO = '<svg class="lazo" viewBox="0 0 28 18" aria-hidden="true"><path d="M14 10 3 2v14zM14 10l11-8v14z" fill="#b8322a" stroke="#fffdf8" stroke-width="1.5" stroke-linejoin="round"/><circle cx="14" cy="10" r="3.4" fill="#d9a441" stroke="#fffdf8" stroke-width="1.2"/></svg>';
@@ -757,7 +895,7 @@ function bloqueRecuerdo(d, x) {
   const lab = el("label"), inp = el("input"); inp.type = "file"; inp.accept = "image/*"; inp.id = "recuerdo-" + d;
   const txt = el("span");
   lab.append(inp, txt);
-  const nota = el("span", "aviso-local", "Se guarda sola en este móvil.");
+  const nota = el("span", "aviso-local", window.SyncApp && window.SyncApp.activo() ? "Se guarda sola y aparece también en el otro móvil." : "Se guarda sola en este móvil.");
   function mostrar(v) {
     marco.hidden = !v; if (v) { img.src = v.url; cuando.textContent = new Date(v.fecha).toLocaleDateString("es-ES", {day: "numeric", month: "long", year: "numeric"}); }
     titulo.textContent = v ? "Tu recuerdo de este regalo" : (x.subirFoto ? "¿Ya tienes tus flores? Enséñamelas" : "Guarda una foto de este regalo");
@@ -779,6 +917,7 @@ function bloqueRecuerdo(d, x) {
   });
   mostrar(null); marco.hidden = true;
   Recuerdos.get(d).then(v => mostrar(v || null));
+  document.addEventListener("recuerdos", ev => { if (ev.detail === d && b.isConnected) Recuerdos.get(d).then(v => mostrar(v || null)); });
   b.append(titulo, marco, lab, nota);
   return b;
 }
@@ -811,7 +950,7 @@ $("copiaAbrir").addEventListener("change", e => {
   fr.onload = async () => {
     try {
       const j = JSON.parse(fr.result); if (j.tipo !== "adviento-cristina") throw 0;
-      let n = 0; for (const [d, v] of Object.entries(j.recuerdos || {})) { if (v && v.url) { await Recuerdos.set(+d, v.url); n++; } }
+      let n = 0; for (const [d, v] of Object.entries(j.recuerdos || {})) { if (v && v.url) { await Recuerdos.set(+d, v.url, v.fecha); n++; } }
       avisar(n + (n === 1 ? " foto recuperada." : " fotos recuperadas.")); abrirCopia(); pintar();
     } catch (er) { avisar("Ese archivo no es una copia de este calendario."); }
     e.target.value = "";
@@ -932,6 +1071,7 @@ async function abrirCandado(clave, recordar) {
   const DATOS = await descifrar(clave);
   if (recordar) try { localStorage.setItem("adv_clave", clave); } catch (e) {}
   document.getElementById("candado").hidden = true;
+  try { await SyncApp.iniciar(DATOS.rk); } catch (e) {}
   arrancarApp(DATOS);
 }
 document.getElementById("candadoForm").addEventListener("submit", async ev => {
