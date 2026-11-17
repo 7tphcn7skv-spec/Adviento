@@ -1121,6 +1121,7 @@ arrancarElfa();
 const ITER = 250000;
 async function descifrar(clave) {
   const buf = new Uint8Array(await (await fetch("datos.bin")).arrayBuffer());
+  clave = clave.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").split(/\s+/).filter(Boolean).join(" ");
   const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(clave), "PBKDF2", false, ["deriveKey"]);
   const k = await crypto.subtle.deriveKey({name: "PBKDF2", salt: buf.slice(0, 16), iterations: ITER, hash: "SHA-256"}, base, {name: "AES-GCM", length: 256}, false, ["decrypt"]);
   const claro = await crypto.subtle.decrypt({name: "AES-GCM", iv: buf.slice(16, 28)}, k, buf.slice(28));
