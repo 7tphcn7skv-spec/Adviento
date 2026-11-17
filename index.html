@@ -105,6 +105,20 @@ h1{font-family:var(--f-titulo);font-weight:700;font-size:clamp(30px,9vw,38px);li
   background:repeating-linear-gradient(var(--rojo) 0 11px,var(--rojo-hondo) 11px 12px)}
 .fila{display:grid;gap:14px;align-items:end}
 .suelo{position:relative;z-index:2;height:34px;margin:0 -16px;background:var(--nieve);border-radius:60% 60% 0 0/100% 100% 0 0}
+.copia-btn{display:block;margin:18px auto 0;border:1.5px solid var(--verde);background:none;color:var(--verde);border-radius:999px;padding:9px 18px;font-weight:700;font-size:14px}
+.copia{position:fixed;z-index:72;left:0;right:0;bottom:0;background:var(--nieve);color:var(--tinta);border-radius:22px 22px 0 0;box-shadow:0 -10px 30px rgba(0,0,0,.25);
+  padding-top:10px;padding-bottom:calc(22px + env(safe-area-inset-bottom, 0px));padding-left:max(20px, env(safe-area-inset-left, 0px));padding-right:max(20px, env(safe-area-inset-right, 0px));animation:hoja .32s cubic-bezier(.2,1,.4,1) both}
+.copia-in{max-width:430px;margin:0 auto;display:grid;gap:12px}
+.copia h3{margin:0;font-family:var(--f-titulo);font-size:22px;color:var(--verde)}
+.copia p{margin:0;font-size:14.5px;max-width:60ch}
+.copia .miniaturas{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
+.copia .miniaturas img{width:54px;height:54px;object-fit:cover;border-radius:8px;flex:none}
+.copia .fila-b{display:flex;gap:8px;flex-wrap:wrap}
+.copia .fila-b button,.copia .fila-b label{flex:1;min-height:46px;display:grid;place-items:center;border:1.5px solid var(--verde);background:none;color:var(--verde);border-radius:14px;font-weight:700;font-size:14px;cursor:pointer;text-align:center;padding:6px 10px}
+.copia .fila-b .principal{background:var(--verde);color:var(--nieve)}
+.copia input[type=file]{position:absolute;width:1px;height:1px;opacity:0}
+.copia .asa{background:var(--crema-hondo)}
+.copia-velo{z-index:71}
 .firma{background:var(--nieve);margin:0 -16px;padding:6px 16px 0;text-align:center;font-family:var(--f-mano);font-size:22px;color:var(--verde)}
 
 /* ---------- Ventanas ---------- */
@@ -203,6 +217,8 @@ h1{font-family:var(--f-titulo);font-weight:700;font-size:clamp(30px,9vw,38px);li
 .recuerdo input{position:absolute;width:1px;height:1px;opacity:0}
 .recuerdo .ramo{display:block;width:min(64vw,240px);background:var(--nieve);padding:10px 10px 34px;border-radius:4px;box-shadow:0 14px 30px rgba(0,0,0,.4);transform:rotate(3deg);animation:sale .9s cubic-bezier(.2,1.3,.4,1) both}
 .recuerdo .ramo img{display:block;width:100%;aspect-ratio:1;object-fit:cover}
+.recuerdo .cuando{display:block;font-family:var(--f-mano);font-size:18px;color:var(--tinta);margin-top:6px}
+.recuerdo .ramo{padding-bottom:10px}
 .recuerdo .aviso-local{font-family:var(--f-texto);font-size:12.5px;opacity:.7;color:var(--crema)}
 .volver{border:2px solid var(--crema);background:none;color:var(--crema);border-radius:999px;padding:11px 22px;font-weight:700;font-size:15px}
 
@@ -288,7 +304,7 @@ img{max-width:100%}
     <div class="guirnalda" id="guirnalda"><svg viewBox="0 0 400 50" preserveAspectRatio="none" aria-hidden="true"><path d="M0 4Q50 36 100 7Q150 36 200 7Q250 36 300 7Q350 36 400 4" fill="none" stroke="#4f5d2f" stroke-width="10" stroke-linecap="round"/><path d="M0 4Q50 36 100 7Q150 36 200 7Q250 36 300 7Q350 36 400 4" fill="none" stroke="#7d8f4e" stroke-width="10" stroke-dasharray="2 8"/></svg></div>
     <div class="cuerpo" id="cuerpo"></div>
     <div class="suelo"></div>
-    <div class="firma" id="firma"></div>
+    <div class="firma" id="firma"><span id="firmaTxt"></span><button class="copia-btn" id="copiaBtn">Tus fotos de los regalos</button></div>
   </section>
 </main>
 
@@ -320,6 +336,21 @@ img{max-width:100%}
   </div>
 </aside>
 
+<div class="velo copia-velo" id="copiaVelo" hidden></div>
+<aside class="copia" id="copia" hidden aria-label="Tus fotos de los regalos">
+  <div class="copia-in">
+    <div class="asa"></div>
+    <h3>Tus fotos de los regalos</h3>
+    <p id="copiaTxt"></p>
+    <div class="miniaturas" id="copiaMini"></div>
+    <p>Quedan guardadas en este móvil. Para tenerlas también fuera de él, haz de vez en cuando una copia y guárdala en Archivos, Drive o donde quieras.</p>
+    <div class="fila-b">
+      <button class="principal" id="copiaGuardar">Guardar copia</button>
+      <label>Recuperar copia<input type="file" id="copiaAbrir" accept=".json,application/json"></label>
+    </div>
+    <div class="fila-b"><button id="copiaCerrar">Cerrar</button></div>
+  </div>
+</aside>
 <div class="editor" id="editor" hidden>
   <div class="editor-in">
     <header><h2>Editar los 24 días</h2><button id="editorCerrar">Listo</button></header>
@@ -392,6 +423,35 @@ function estadoDia(d) {
 }
 
 function vibrar(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
+
+/* ---------- Fotos de los regalos: guardadas en IndexedDB y marcadas como persistentes ---------- */
+const Recuerdos = (() => {
+  let dbp = null;
+  function db() {
+    if (!dbp) dbp = new Promise((ok, mal) => {
+      try {
+        const r = indexedDB.open("adviento-cristina", 1);
+        r.onupgradeneeded = () => r.result.createObjectStore("recuerdos");
+        r.onsuccess = () => ok(r.result); r.onerror = () => mal(r.error);
+      } catch (e) { mal(e); }
+    });
+    return dbp;
+  }
+  async function op(modo, fn) {
+    const d = await db();
+    return new Promise((ok, mal) => { const t = d.transaction("recuerdos", modo); const r = fn(t.objectStore("recuerdos")); t.oncomplete = () => ok(r && r.result); t.onerror = () => mal(t.error); });
+  }
+  const pedirPersistencia = () => { try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) {} };
+  return {
+    get: d => op("readonly", s => s.get(d)).catch(() => null),
+    set: (d, url) => { pedirPersistencia(); return op("readwrite", s => s.put({url, fecha: Date.now()}, d)); },
+    todos: async () => { const out = {}; for (let d = 1; d <= 24; d++) { const v = await op("readonly", s => s.get(d)).catch(() => null); if (v) out[d] = v; } return out; },
+    async migrar() {   // trae la foto del ramo guardada con la versión anterior
+      for (let d = 1; d <= 24; d++) { const v = leer("adv_recuerdo_" + d, null); if (v && !(await this.get(d))) { await this.set(d, v); } }
+    }
+  };
+})();
+Recuerdos.migrar().catch(() => {});
 
 /* ---------- Construir la casa ---------- */
 const LAZO = '<svg class="lazo" viewBox="0 0 28 18" aria-hidden="true"><path d="M14 10 3 2v14zM14 10l11-8v14z" fill="#b8322a" stroke="#fffdf8" stroke-width="1.5" stroke-linejoin="round"/><circle cx="14" cy="10" r="3.4" fill="#d9a441" stroke="#fffdf8" stroke-width="1.2"/></svg>';
@@ -591,7 +651,7 @@ function arrancarElfa() {
 
 function pintar() {
   $("para").textContent = CONFIG.para;
-  $("firma").textContent = CONFIG.firma;
+  $("firmaTxt").textContent = CONFIG.firma;
   for (let d = 1; d <= 24; d++) {
     const e = estadoDia(d), w = wins[d];
     w.classList.toggle("is-abierta", e === "abierta");
@@ -685,40 +745,80 @@ function revelar(d, nuevo) {
   const volver = el("button", "volver", "Volver a la casa");
   volver.addEventListener("click", cerrar);
   caja.append(pol, el("p", "gira", "Toca la foto para ver lo que hay detrás"), et);
-  if (x.subirFoto) caja.appendChild(bloqueRecuerdo(d));
+  caja.appendChild(bloqueRecuerdo(d, x));
   caja.appendChild(volver);
 }
 // Sitio para que ella suba su propia foto (por ejemplo, el ramo del día 3)
-function bloqueRecuerdo(d) {
-  const b = el("div", "recuerdo"), clave = "adv_recuerdo_" + d;
-  const marco = el("span", "ramo"), img = new Image(); img.alt = "Tu foto del regalo"; marco.appendChild(img);
+function bloqueRecuerdo(d, x) {
+  const b = el("div", "recuerdo");
+  const marco = el("span", "ramo"), img = new Image(); img.alt = "Tu foto del regalo del día " + d;
+  const cuando = el("span", "cuando"); marco.append(img, cuando);
   const titulo = el("p");
   const lab = el("label"), inp = el("input"); inp.type = "file"; inp.accept = "image/*"; inp.id = "recuerdo-" + d;
   const txt = el("span");
   lab.append(inp, txt);
-  const nota = el("span", "aviso-local", "La foto se guarda en este móvil.");
-  function mostrar(url) {
-    marco.hidden = !url; if (url) img.src = url;
-    titulo.textContent = url ? "Tu ramo, guardado para siempre" : "¿Ya tienes tus flores? Enséñamelas";
-    txt.textContent = url ? "Cambiar la foto" : "Subir foto del ramo";
+  const nota = el("span", "aviso-local", "Se guarda sola en este móvil.");
+  function mostrar(v) {
+    marco.hidden = !v; if (v) { img.src = v.url; cuando.textContent = new Date(v.fecha).toLocaleDateString("es-ES", {day: "numeric", month: "long", year: "numeric"}); }
+    titulo.textContent = v ? "Tu recuerdo de este regalo" : (x.subirFoto ? "¿Ya tienes tus flores? Enséñamelas" : "Guarda una foto de este regalo");
+    txt.textContent = v ? "Cambiar la foto" : (x.subirFoto ? "Subir foto del ramo" : "Subir foto");
   }
   inp.addEventListener("change", () => {
     const f = inp.files[0]; if (!f) return;
     const fr = new FileReader();
-    fr.onload = () => { const im = new Image(); im.onload = () => {
-      const k = Math.min(1, 900 / Math.max(im.width, im.height)), c = document.createElement("canvas");
+    fr.onload = () => { const im = new Image(); im.onload = async () => {
+      const k = Math.min(1, 1200 / Math.max(im.width, im.height)), c = document.createElement("canvas");
       c.width = im.width * k; c.height = im.height * k; c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
-      const url = c.toDataURL("image/jpeg", .8);
-      mostrar(url); marco.style.animation = "none"; void marco.offsetWidth; marco.style.animation = "";
-      const r = marco.getBoundingClientRect(); estallar(r.left + r.width / 2, r.top + r.height / 2, 60, true);
-      if (!guardar(clave, url)) avisar("La foto se ve ahora, pero no cabe en la memoria del móvil y se perderá al cerrar.");
+      const v = {url: c.toDataURL("image/jpeg", .82), fecha: Date.now()};
+      mostrar(v); marco.style.animation = "none"; void marco.offsetWidth; marco.style.animation = "";
+      const r = marco.getBoundingClientRect(); estallar(r.left + r.width / 2, r.top + r.height / 2, 60, true); vibrar([15, 30, 15]);
+      try { await Recuerdos.set(d, v.url); avisar("Foto guardada en el día " + d + "."); pintar(); }
+      catch (e) { avisar("No se ha podido guardar la foto. Revisa que el móvil tenga espacio libre."); }
     }; im.src = fr.result; };
     fr.readAsDataURL(f);
   });
-  mostrar(leer(clave, null));
+  mostrar(null); marco.hidden = true;
+  Recuerdos.get(d).then(v => mostrar(v || null));
   b.append(titulo, marco, lab, nota);
   return b;
 }
+
+/* ---------- Copia de seguridad de las fotos ---------- */
+async function abrirCopia() {
+  const todos = await Recuerdos.todos().catch(() => ({})), n = Object.keys(todos).length;
+  $("copiaTxt").textContent = n ? "Tienes " + n + (n === 1 ? " foto guardada." : " fotos guardadas.") : "Todavía no has guardado ninguna foto. Al abrir cada día puedes subir una del regalo.";
+  const mini = $("copiaMini"); mini.textContent = ""; mini.hidden = !n;
+  Object.entries(todos).forEach(([d, v]) => { const i = new Image(); i.src = v.url; i.alt = "Día " + d; mini.appendChild(i); });
+  $("copiaGuardar").disabled = !n;
+  $("copia").hidden = $("copiaVelo").hidden = false;
+}
+function cerrarCopia() { $("copia").hidden = $("copiaVelo").hidden = true; }
+$("copiaBtn").addEventListener("click", abrirCopia);
+$("copiaCerrar").addEventListener("click", cerrarCopia);
+$("copiaVelo").addEventListener("click", cerrarCopia);
+$("copiaGuardar").addEventListener("click", async () => {
+  const todos = await Recuerdos.todos();
+  const nombre = "adviento-recuerdos-" + new Date().toISOString().slice(0, 10) + ".json";
+  const archivo = new File([JSON.stringify({tipo: "adviento-cristina", version: 1, recuerdos: todos})], nombre, {type: "application/json"});
+  try { if (navigator.canShare && navigator.canShare({files: [archivo]})) { await navigator.share({files: [archivo], title: nombre}); return; } } catch (e) { if (e && e.name === "AbortError") return; }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(archivo); a.download = nombre; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  avisar("Copia preparada: " + nombre);
+});
+$("copiaAbrir").addEventListener("change", e => {
+  const f = e.target.files[0]; if (!f) return;
+  const fr = new FileReader();
+  fr.onload = async () => {
+    try {
+      const j = JSON.parse(fr.result); if (j.tipo !== "adviento-cristina") throw 0;
+      let n = 0; for (const [d, v] of Object.entries(j.recuerdos || {})) { if (v && v.url) { await Recuerdos.set(+d, v.url); n++; } }
+      avisar(n + (n === 1 ? " foto recuperada." : " fotos recuperadas.")); abrirCopia(); pintar();
+    } catch (er) { avisar("Ese archivo no es una copia de este calendario."); }
+    e.target.value = "";
+  };
+  fr.readAsText(f);
+});
+
 function cerrar() { $("regalo").hidden = true; $("regaloIn").textContent = ""; }
 $("cerrar").addEventListener("click", cerrar);
 document.addEventListener("keydown", e => { if (e.key === "Escape") { cerrar(); $("editor").hidden = true; } });
