@@ -119,6 +119,13 @@ h1{font-family:var(--f-titulo);font-weight:700;font-size:clamp(30px,9vw,38px);li
 .copia input[type=file]{position:absolute;width:1px;height:1px;opacity:0}
 .copia .asa{background:var(--crema-hondo)}
 .copia-velo{z-index:71}
+#secretoVelo{z-index:73}
+.secreto{position:fixed;z-index:74;left:50%;top:40%;transform:translate(-50%,-50%);width:min(300px,calc(100% - 32px));background:var(--verde-noche);color:var(--crema);border-radius:18px;padding:18px;display:grid;gap:10px;box-shadow:0 20px 50px rgba(0,0,0,.4)}
+.secreto input{font:inherit;padding:11px;border-radius:10px;border:1.5px solid rgba(247,237,211,.35);background:rgba(247,237,211,.08);color:var(--crema);text-align:center}
+.secreto-b{display:flex;gap:8px}
+.secreto-b button{flex:1;min-height:42px;border-radius:10px;border:1.5px solid rgba(247,237,211,.5);background:none;color:var(--crema);font-weight:700}
+.secreto-b button[type=submit]{background:var(--oro);border-color:var(--oro);color:var(--verde-noche)}
+.secreto small{min-height:1.2em;color:var(--tejado);text-align:center}
 .firma{background:var(--nieve);margin:0 -16px;padding:6px 16px 0;text-align:center;font-family:var(--f-mano);font-size:22px;color:var(--verde)}
 
 /* ---------- Ventanas ---------- */
@@ -342,6 +349,7 @@ img{max-width:100%}
       <button id="btnReiniciar">Cerrar todo</button>
     </div>
     <div class="beta-fila acciones"><button class="principal" id="betaCerrar">Ver el calendario</button></div>
+    <div class="beta-fila acciones" id="betaSalirFila" hidden><button id="betaSalir">Salir del modo prueba en este móvil</button></div>
   </div>
 </aside>
 
@@ -360,6 +368,13 @@ img{max-width:100%}
     <div class="fila-b"><button id="copiaCerrar">Cerrar</button></div>
   </div>
 </aside>
+<div class="velo" id="secretoVelo" hidden></div>
+<form class="secreto" id="secreto" hidden autocomplete="off">
+  <strong>Modo prueba</strong>
+  <input id="secretoCodigo" type="password" placeholder="Código" aria-label="Código del modo prueba" autocapitalize="off" spellcheck="false">
+  <div class="secreto-b"><button type="button" id="secretoNo">Cancelar</button><button type="submit">Entrar</button></div>
+  <small id="secretoError"></small>
+</form>
 <div class="editor" id="editor" hidden>
   <div class="editor-in">
     <header><h2>Editar los 24 días</h2><button id="editorCerrar">Listo</button></header>
@@ -564,7 +579,8 @@ const CONFIG = {
   anio: 2026,
   mes: 11,                 // 11 = diciembre (los meses empiezan en 0)
   soloEseDia: false,       // true = cada ventana solo se puede abrir SU día; si se pasa, se pierde
-  mostrarBeta: true        // false = oculta la barra de pruebas (versión final)
+  mostrarBeta: false,       // false = oculta la barra de pruebas (versión final)
+  betaHash: "cbd4067061486233af8e23183e89998ba562be0de96aa2f5941055e9c63ef1a3"             // huella del código secreto que activa el modo prueba en un móvil concreto
 };
 // Un objeto por día: pie de foto, título del regalo, texto y nota del dorso. Todo son EJEMPLOS.
 const DIAS = DATOS.dias;
@@ -580,8 +596,10 @@ const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); re
 const calmado = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const dos = n => String(n).padStart(2, "0");
 
+// Modo prueba: visible en la beta, o activado a escondidas en el móvil de Pablo con su código
+const MODO_BETA = CONFIG.mostrarBeta || leer("adv_beta", false) === true;
 let sim = leer("adv2_sim", 1);                 // 0 = fecha real; 1–25 = día de diciembre simulado
-if (!CONFIG.mostrarBeta) sim = 0;
+if (!MODO_BETA) sim = 0;
 let abiertas = leer("adv2_abiertas", null);
 if (!abiertas) abiertas = [];
 let cambios = leer("adv_datos", {});
@@ -1063,8 +1081,8 @@ addEventListener("resize", remedir); remedir();
 if (!calmado) requestAnimationFrame(cicloNieve);
 
 /* ---------- Controles beta ---------- */
-$("betaFab").hidden = !CONFIG.mostrarBeta;
-function hojaBeta(abrir) { $("betaHoja").hidden = $("velo").hidden = !abrir; $("betaFab").hidden = abrir || !CONFIG.mostrarBeta; }
+$("betaFab").hidden = !MODO_BETA;
+function hojaBeta(abrir) { $("betaHoja").hidden = $("velo").hidden = !abrir; $("betaFab").hidden = abrir || !MODO_BETA; }
 $("betaFab").addEventListener("click", () => { vibrar(10); hojaBeta(true); });
 $("velo").addEventListener("click", () => hojaBeta(false));
 $("betaCerrar").addEventListener("click", () => hojaBeta(false));
@@ -1073,6 +1091,27 @@ $("sim").addEventListener("input", e => ponerSim(+e.target.value));
 $("diaMenos").addEventListener("click", () => ponerSim(sim - 1));
 $("diaMas").addEventListener("click", () => ponerSim(sim + 1));
 $("btnReiniciar").addEventListener("click", () => { abiertas = []; guardar("adv2_abiertas", abiertas); pintar(); avisar("Todas las ventanas vuelven a estar sin abrir."); });
+
+/* ---------- Puerta secreta al modo prueba ---------- */
+if (!CONFIG.mostrarBeta && MODO_BETA) $("betaSalirFila").hidden = false;
+$("betaSalir").addEventListener("click", () => { guardar("adv_beta", false); guardar("adv2_sim", 0); location.reload(); });
+{
+  let toques = 0, t0 = 0;
+  const abrirSecreto = v => { $("secreto").hidden = $("secretoVelo").hidden = !v; $("secretoError").textContent = ""; $("secretoCodigo").value = ""; if (v) $("secretoCodigo").focus(); };
+  $("firmaTxt").addEventListener("click", () => {
+    const ahora = Date.now(); toques = ahora - t0 < 700 ? toques + 1 : 1; t0 = ahora;
+    if (toques >= 5 && CONFIG.betaHash && !MODO_BETA) { toques = 0; abrirSecreto(true); }
+  });
+  $("secretoNo").addEventListener("click", () => abrirSecreto(false));
+  $("secretoVelo").addEventListener("click", () => abrirSecreto(false));
+  $("secreto").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const t = $("secretoCodigo").value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\s+/).filter(Boolean).join(" ");
+    const h = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("adviento-beta:" + t)))).map(x => x.toString(16).padStart(2, "0")).join("");
+    if (h === CONFIG.betaHash) { guardar("adv_beta", true); location.reload(); }
+    else { $("secretoError").textContent = "Código incorrecto."; vibrar([30, 40, 30]); }
+  });
+}
 
 /* ---------- Editor ---------- */
 const CAMPOS = [["pie", "Pie de foto", "text"], ["regalo", "Título del regalo", "text"], ["texto", "Descripción del regalo", "area"], ["nota", "Nota escrita detrás de la foto", "area"]];
